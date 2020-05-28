@@ -48,13 +48,12 @@ def find_pairs(df_price):
     # Normalization
     df_return = df_price.pct_change()
     df_return = df_return.dropna(axis=0)
-    scaler = StandardScaler()
-    df_return = pd.DataFrame(scaler.fit_transform(df_return), columns=df_return.columns, index=df_return.index)
-
     """
     for col in df_return.columns:
         df_return[col] = (df_return[col] - df_return[col].mean()) / df_return[col].std()
     """
+    scaler = StandardScaler()
+    df_return = pd.DataFrame(scaler.fit_transform(df_return), columns=df_return.columns, index=df_return.index)
 
     # PCA on return space
     pca = PCA()
@@ -128,7 +127,7 @@ def find_pairs(df_price):
         clustering_algo = {
             'Kmeans': KMeans(n_clusters=k, init='k-means++', random_state=1),
             'OPTICS': OPTICS(min_samples=3, max_eps=0.1),
-            'OPTICS_1': OPTICS(min_samples=3, max_eps=0.1),
+            'OPTICS_1': OPTICS(min_samples=k, max_eps=0.1),
             'OPTICS_2': OPTICS(min_samples=int(np.sqrt(k)), max_eps=0.1),
             'AC': AgglomerativeClustering(),
             'AP': AffinityPropagation(),
@@ -144,9 +143,10 @@ def find_pairs(df_price):
         # gmm.fit(df_params.loc[target_tickers, factor_sig == True])
         clustering = clustering_algo['OPTICS']
         clustering.fit(df_params.loc[target_tickers, factor_sig == True])
-        # d['cluster'] = kmeans_pca.labels_
-        d['cluster'] = clustering.labels_
+        d['cluster'] = kmeans.labels_
+        # d['cluster'] = clustering.labels_
         # d['cluster'] = gmm.predict(df_params.loc[target_tickers, factor_sig == True])
+
         # Validation code with Image
         if k == -1:
             tc = factor_sig == True
