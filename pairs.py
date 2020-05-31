@@ -5,7 +5,8 @@ from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from sklearn.cluster import KMeans, OPTICS, DBSCAN, SpectralClustering, AffinityPropagation, MeanShift, Birch, AgglomerativeClustering
+from sklearn.cluster import KMeans, OPTICS, DBSCAN, \
+    SpectralClustering, AffinityPropagation, MeanShift, Birch, AgglomerativeClustering
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 from statsmodels.tsa.stattools import adfuller
@@ -66,7 +67,7 @@ def find_pairs(df_price):
     for i in range(eig_lim):
         df_eig[i] = df_return.mul(pca.components_[i], axis=1).sum(axis=1)
 
-    # regression (X: Eigen portfolios(Risk Factor from PCA), Y: Individual Return)
+    # Regression (X: Eigen portfolios(Risk Factor from PCA), Y: Individual Return)
     df_reg = df_eig.copy()
     df_reg = sm.add_constant(df_reg)
 
@@ -81,7 +82,7 @@ def find_pairs(df_price):
     df_params = df_params.T
     df_pval = df_pval.T
 
-    # First Clustering: Grouping stocks which have same confident factors
+    # First Clustering: Grouping stocks which have same significant factors
     pval_thr = 0.05
     df_pval_bool = df_pval < pval_thr
 
@@ -143,8 +144,8 @@ def find_pairs(df_price):
         # gmm.fit(df_params.loc[target_tickers, factor_sig == True])
         clustering = clustering_algo['OPTICS']
         clustering.fit(df_params.loc[target_tickers, factor_sig == True])
-        d['cluster'] = kmeans.labels_
-        # d['cluster'] = clustering.labels_
+        # d['cluster'] = kmeans.labels_
+        d['cluster'] = clustering.labels_
         # d['cluster'] = gmm.predict(df_params.loc[target_tickers, factor_sig == True])
 
         # Validation code with Image
@@ -174,7 +175,7 @@ def find_pairs(df_price):
         print("Finding Pairs from {} Cluster({} stocks in the cluster)..".format(i, len(c1)))
         for c2 in c1['cluster'].unique():
             if c2 == -1:
-                print('Noise')
+                # print('Noise')
                 continue
             print("\tFinding Pairs from {} Small Cluster".format(c2))
             stocks = c1.index[c1['cluster'] == c2]

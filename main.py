@@ -87,12 +87,13 @@ def pairs_trading(formation_price, trading_price, ml_list=None):
     ###########################
     #      Finding Pairs      #
     ###########################
-    if not os.path.isfile('pickle/pairs3.pkl'):
+    pickle_name = str(formation_price.index[0].date()) + '_' + str(trading_price.index[-1].date())
+    if not os.path.isfile('pickle/{}.pkl'.format(pickle_name)):
         df_pairs = pairs.find_pairs(formation_price)
-        # df_pairs.to_pickle('pickle/pairs.pkl')
+        df_pairs.to_pickle('pickle/{}.pkl'.format(pickle_name))
     else:
         print('Get Pairs from Pickle...')
-        df_pairs = pd.read_pickle('pickle/pairs.pkl')
+        df_pairs = pd.read_pickle('pickle/{}.pkl'.format(pickle_name))
 
     ###########################
     #    Trading with Pairs   #
@@ -171,6 +172,11 @@ if __name__ == func_t:
     macd = Close.apply(lambda x: talib.MACD(x, 12, 26, 9)[0])
     # macd_sig = Close.apply(lambda x: talib.MACD(x, 12, 26, 9)[1])
 
+    # Momentum(Log Returns for x period)
+    mom20 = (np.log(Close)).diff(20)
+    mom60 = (np.log(Close)).diff(60)
+    mom120 = (np.log(Close)).diff(120)
+
     ###########################
     #     Set Time Period     #
     ###########################
@@ -213,6 +219,9 @@ if __name__ == func_t:
         df_bbd = bb_dn.loc[fs:te, :].copy()
         df_rsi14 = rsi14.loc[fs:te, :].copy()
         df_macd = macd.loc[fs:te, :].copy()
+        df_mom20 = mom20.loc[fs:te, :].copy()
+        df_mom60 = mom60.loc[fs:te, :].copy()
+        df_mom120 = mom120.loc[fs:te, :].copy()
 
         # Drop NA Stocks
         df_price = df_price.dropna(axis=1)
@@ -229,6 +238,9 @@ if __name__ == func_t:
         df_bbd = df_bbd.dropna(axis=1)
         df_rsi14 = df_rsi14.dropna(axis=1)
         df_macd = df_macd.dropna(axis=1)
+        df_mom20 = df_mom20.dropna(axis=1)
+        df_mom60 = df_mom60.dropna(axis=1)
+        df_mom120 = df_mom120.dropna(axis=1)
 
         print('{} ~ {}'.format(fs, te))
         print('# of Stocks: {}'.format(len(df_price.columns)))
@@ -251,26 +263,33 @@ if __name__ == func_t:
         formation_rsi14, trading_rsi14 = df_rsi14[fs:fe], df_rsi14[ts:te]
         formation_macd, trading_macd = df_macd[fs:fe], df_macd[ts:te]
 
+        formation_mom20, trading_mom20 = df_mom20[fs:fe], df_mom20[ts:te]
+        formation_mom60, trading_mom60 = df_mom60[fs:fe], df_mom60[ts:te]
+        formation_mom120, trading_mom120 = df_mom120[fs:fe], df_mom120[ts:te]
+
         ml_list = [
             (formation_volume, trading_volume),
-            (formation_ma5, trading_ma5),
-            (formation_ma20, trading_ma20),
-            (formation_ma60, trading_ma60),
-            (formation_ma120, trading_ma120),
+            # (formation_ma5, trading_ma5),
+            # (formation_ma20, trading_ma20),
+            # (formation_ma60, trading_ma60),
+            # (formation_ma120, trading_ma120),
             # (formation_ema5, trading_ema5),
-            # (formation_ema20, trading_ema20),
+            (formation_ema20, trading_ema20),
             # (formation_ema60, trading_ema60),
             # (formation_ema120, trading_ema120),
-            (formation_bbu, trading_bbu),
-            (formation_bbd, trading_bbd),
+            # (formation_bbu, trading_bbu),
+            # (formation_bbd, trading_bbd),
             (formation_rsi14, trading_rsi14),
             (formation_macd, trading_macd),
+            (formation_mom20, trading_mom20),
+            # (formation_mom60, trading_mom60),
         ]
 
-        stat = pairs_trading(formation_close, trading_close)#, ml_list=ml_list)
+        stat = pairs_trading(formation_close, trading_close, ml_list=ml_list)
         stat.print_statistics()
         stat_list.append(stat)
-    pd.to_pickle(stat_list, './pickle/stat_kmeans.pkl')
+    pd.to_pickle(stat_list, './pickle/stat_optics(3)_ma_xgb_log2.pkl')
+    # pd.to_pickle(stat_list, './pickle/stat_optics(3)_ma_logit.pkl')
 
 
 if __name__ == func_o:
@@ -326,6 +345,11 @@ if __name__ == func_o:
     macd = Close.apply(lambda x: talib.MACD(x, 12, 26, 9)[0])
     # macd_sig = Close.apply(lambda x: talib.MACD(x, 12, 26, 9)[1])
 
+    # Momentum(Log Returns for x period)
+    mom20 = (np.log(Close)).diff(20)
+    mom60 = (np.log(Close)).diff(60)
+    mom120 = (np.log(Close)).diff(120)
+
     # Set Formation & Trading Period
     # fs = datetime.datetime(2018, 1, 1)
     # fe = datetime.datetime(2018, 12, 31)
@@ -355,6 +379,9 @@ if __name__ == func_o:
     df_bbd = bb_dn.loc[fs:te, :].copy()
     df_rsi14 = rsi14.loc[fs:te, :].copy()
     df_macd = macd.loc[fs:te, :].copy()
+    df_mom20 = mom20.loc[fs:te, :].copy()
+    df_mom60 = mom60.loc[fs:te, :].copy()
+    df_mom120 = mom120.loc[fs:te, :].copy()
 
     # Drop NA Stocks
     df_price = df_price.dropna(axis=1)
@@ -371,6 +398,9 @@ if __name__ == func_o:
     df_bbd = df_bbd.dropna(axis=1)
     df_rsi14 = df_rsi14.dropna(axis=1)
     df_macd = df_macd.dropna(axis=1)
+    df_mom20 = df_mom20.dropna(axis=1)
+    df_mom60 = df_mom60.dropna(axis=1)
+    df_mom120 = df_mom120.dropna(axis=1)
 
     print('{} ~ {}'.format(fs, te))
     print('# of Stocks: {}'.format(len(df_price.columns)))
@@ -393,6 +423,10 @@ if __name__ == func_o:
     formation_bbd, trading_bbd = df_bbd[fs:fe], df_bbd[ts:te]
     formation_rsi14, trading_rsi14 = df_rsi14[fs:fe], df_rsi14[ts:te]
     formation_macd, trading_macd = df_macd[fs:fe], df_macd[ts:te]
+
+    formation_mom20, trading_mom20 = df_mom20[fs:fe], df_mom20[ts:te]
+    formation_mom60, trading_mom60 = df_mom60[fs:fe], df_mom60[ts:te]
+    formation_mom120, trading_mom120 = df_mom120[fs:fe], df_mom120[ts:te]
 
     ml_list = [
         (formation_volume, trading_volume),

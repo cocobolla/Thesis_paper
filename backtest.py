@@ -5,7 +5,14 @@ from sklearn import svm
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import RandomizedSearchCV, GridSearchCV
+from scipy.stats import reciprocal, uniform
+
+
+import talib
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 
 sd_weight = {
@@ -163,9 +170,18 @@ def get_ml_features(*args):
 def get_ml_label(y_series):
     alpha = 0.4
     fit_smoothing = SimpleExpSmoothing(y_series).fit(smoothing_level=alpha, optimized=False)
-    y_smoothing = fit_smoothing.fittedvalues
+    # y_smoothing = fit_smoothing.fittedvalues
     # y_smoothing = y_series
-    y_label = 1*(y_smoothing.diff() > 0).shift(-1).fillna(0)
+    y_smoothing = y_series.rolling(window=10, center=True).mean()
+    y_label = y_smoothing.diff().shift(-1)
+    y_label[y_label.isnull() == False] = (y_label[y_label.isnull() == False] > 0) * 1
+    # y_label = 1*(y_smoothing.diff() > 0).shift(-1)# .fillna(0)
+    """
+    y_series.plot(label='Original')
+    y_smoothing.plot(label='Smoothing')
+    plt.legend()
+    plt.show()
+    """
     return y_label
 
 
@@ -214,6 +230,12 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list):
     X_train = get_ml_features(formation_close.loc[:, [pair1, pair2]], *formation_ml_list)
     y_train = get_ml_label(fspread)
 
+    # Filtering na index in y
+    not_na_index = y_train.isnull() == False
+    target_loc = [y_train.index.get_loc(x) for x in y_train.index[not_na_index]]
+    X_train = X_train[target_loc, :]
+    y_train = y_train[not_na_index]
+
     # Normalization
     scaler = StandardScaler()
     scaler.fit(X_train)
@@ -222,11 +244,12 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list):
     # Test set
     X_test = get_ml_features(trading_close.loc[:, [pair1, pair2]], *trading_ml_list)
     y_test = get_ml_label(tspread)
+    # y_test = get_ml_label((tspread-fspread_mu)/fspread_sd)
     X_test = scaler.transform(X_test)
 
-    na_index = np.isnan(X_train).any(axis=0)
-    X_train = X_train[:, ~na_index]
-    X_test = X_test[:, ~na_index]
+    na_col = np.isnan(X_train).any(axis=0)
+    X_train = X_train[:, ~na_col]
+    X_test = X_test[:, ~na_col]
 
     # Model
     def logistic_training(X, y):
@@ -235,28 +258,75 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list):
         clf.fit(X, y)
         return clf
 
-    def svm_training(X, y):
+    def svm_training(X, y, tuning=True):
         y = y.astype('int')
-        clf = svm.SVC(C=1, gamma=0.1, decision_function_shape='ovo', kernel='rbf')
+        param_distributions = {"gamma": reciprocal(0.001, 0.1), "C": uniform(1, 10)}
+        # clf = svm.SVC(C=1, gamma=0.1, decision_function_shape='ovo', kernel='rbf', random_state=0)
+        clf = svm.SVC(random_state=0, C=1, gamma=0.1, decision_function_shape='ovo', kernel='rbf')
+        if tuning:
+            rnd_search_cv = RandomizedSearchCV(clf, param_distributions, n_iter=100, verbose=0, cv=3, random_state=0)
+            rnd_search_cv.fit(X, y)
+            print("Best Params: {}".format(rnd_search_cv.best_params_))
+            print("Best Score: {:.2f}".format(rnd_search_cv.best_score_))
+            clf = rnd_search_cv.best_estimator_
         clf.fit(X, y)
         return clf
 
-    def rf_training(X, y):
+    def rf_training(X, y, tuning=True):
         y = y.astype('int')
-        clf = RandomForestClassifier(n_estimators=30, criterion='entropy')
+        params = {
+            'n_estimators': [50, 100, 300, 500],
+            'min_samples_leaf': [4],
+            # 'min_samples_split': [2, 5, 10],
+            'min_samples_split': [2],
+            'max_depth': [10, 30, 70]
+        }
+        clf = RandomForestClassifier(n_estimators=30, max_features='auto', n_jobs=12, random_state=0)
+        # clf = RandomForestClassifier(n_estimators=100, max_features='auto', n_jobs=12, random_state=0,
+                                     # min_samples_leaf=4, min_samples_split=2, max_depth=30)
+        if tuning:
+            rnd_search_cv = RandomizedSearchCV(clf, params, n_iter=50, verbose=0, cv=3, random_state=0)
+            # rnd_search_cv = GridSearchCV(clf, params, verbose=0, cv=3)
+            rnd_search_cv.fit(X, y)
+            print("Best Params: {}".format(rnd_search_cv.best_params_))
+            print("Best Score: {:.2f}".format(rnd_search_cv.best_score_))
+            clf = rnd_search_cv.best_estimator_
         clf.fit(X, y)
         return clf
 
-    def xg_training(X, y):
+    def xg_training(X, y, tuning=False):
         y = y.astype('int')
-        clf = XGBClassifier()
+        params = {
+            'n_estimators': [100, 300, 500],
+            'min_child_weight': [1, 5, 10],
+            'gamma': [0.5, 1, 2, 3, 5],
+            # 'subsample': [0.6, 0.8, 1.0],
+            'colsample_bytree': [0.6, 0.8, 1.0],
+            'max_depth': [3, 6, 9]
+        }
+        # clf = XGBClassifier(tree_method='gpu_hist', subsample=0.8, random_state=0)
+        clf = XGBClassifier(tree_method='gpu_hist', subsample=0.8, random_state=0,
+                            n_estimators=150, gamma=1.5, colsample_bytree=0.8, max_depth=8, min_child_weight=5)
+        if tuning:
+            rnd_search_cv = RandomizedSearchCV(clf, params, n_iter=50, verbose=0, cv=3, random_state=0)
+            # rnd_search_cv = GridSearchCV(clf, params, verbose=0, cv=3)
+            rnd_search_cv.fit(X, y)
+            print("Best Params: {}".format(rnd_search_cv.best_params_))
+            print("Best Score: {:.2f}".format(rnd_search_cv.best_score_))
+            clf = rnd_search_cv.best_estimator_
+
         clf.fit(X, y)
         return clf
 
-    model = svm_training(X_train, y_train)
+    model = xg_training(X_train, y_train)
+    # rf = rf_training(X_train, y_train)
+    # imp_values = pd.Series(rf.feature_importances_)
+    # sns.barplot(x=imp_values.index, y=imp_values)
+    # plt.show()
 
     y_pred = model.predict(X_test)
     y_pred = (y_pred > 0.5) * 1
+    # y_pred = model.predict_proba(X_test)[:, 1]
 
     trading['pred'] = y_pred
     trading['test'] = y_test
@@ -278,6 +348,7 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list):
             # trading['position'][i] = 'short' if trading['pred'][i] == 0 else None
             if (prev_status == 3) or (prev_status == 2 and waiting_short == True):
                 if trading['pred'][i] == 0:
+                # if trading['pred'][i] < 0.35:
                     trading['position'][i] = 'short'
                     waiting_short = False
                 else:
@@ -301,6 +372,7 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list):
         if now_status == 6:
             if (prev_status == 5) or (prev_status == 6 and waiting_long == True):
                 if trading['pred'][i] == 1:
+                # if trading['pred'][i] > 0.65:
                     trading['position'][i] = 'long'  # if trading['pred'][i] == 1 else None
                     waiting_long = False
                 else:
