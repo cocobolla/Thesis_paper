@@ -88,12 +88,30 @@ def pairs_trading(formation_price, trading_price, ml_list=None):
     #      Finding Pairs      #
     ###########################
     pickle_name = str(formation_price.index[0].date()) + '_' + str(trading_price.index[-1].date())
-    if not os.path.isfile('pickle/{}.pkl'.format(pickle_name)):
-        df_pairs = pairs.find_pairs(formation_price)
-        df_pairs.to_pickle('pickle/{}.pkl'.format(pickle_name))
+    if not os.path.isfile('pickle/{}_not.pkl'.format(pickle_name)):
+        df_pairs, eig_weights = pairs.find_pairs(formation_price)
+        # pd.Series([df_pairs, eig_weights], index=['pairs', 'eig_weights'])\
+            # .to_pickle('pickle/{}.pkl'.format(pickle_name))
     else:
         print('Get Pairs from Pickle...')
-        df_pairs = pd.read_pickle('pickle/{}.pkl'.format(pickle_name))
+        pair_pkl = pd.read_pickle('pickle/{}.pkl'.format(pickle_name))
+        df_pairs, eig_weights = pair_pkl['pairs'], pair_pkl['eig_weights']
+
+    # Calculate Eigen-Portfolio(Risk Factor)'s Return
+    formation_idx = formation_price.index
+    trading_idx = trading_price.index
+    total_price = formation_price.append(trading_price)
+    total_return = total_price.pct_change().dropna(axis=0)
+    formation_return = total_return.loc[formation_idx, :]
+    trading_return = total_return.loc[trading_idx, :]
+
+    formation_eig_return = pd.DataFrame()
+    trading_eig_return = pd.DataFrame()
+    for i in range(len(eig_weights)):
+        formation_eig_return[i] = formation_return.mul(eig_weights[i], axis=1).sum(axis=1)
+        trading_eig_return[i] = trading_return.mul(eig_weights[i], axis=1).sum(axis=1)
+
+    eig_list = [formation_eig_return, trading_eig_return]
 
     ###########################
     #    Trading with Pairs   #
@@ -106,7 +124,7 @@ def pairs_trading(formation_price, trading_price, ml_list=None):
             trading_history, _ = backtest.get_pair_returns(df_pairs.loc[i, :], formation_price, trading_price)
         else:
             trading_history, _ = backtest.get_pair_returns_ml(df_pairs.loc[i, :],
-                                                              formation_price, trading_price, ml_list)
+                                                              formation_price, trading_price, ml_list, eig_list)
         rest_dict[i] = trading_history#['quantity_neutral']
 
     ###########################
@@ -285,18 +303,20 @@ if __name__ == func_t:
             # (formation_mom60, trading_mom60),
         ]
 
-        stat = pairs_trading(formation_close, trading_close, ml_list=ml_list)
+        # stat = pairs_trading(formation_close, trading_close, ml_list=ml_list)
+        stat = pairs_trading(formation_close, trading_close)
         stat.print_statistics()
         stat_list.append(stat)
-    pd.to_pickle(stat_list, './pickle/stat_optics(3)_ma_xgb_log2.pkl')
-    # pd.to_pickle(stat_list, './pickle/stat_optics(3)_ma_logit.pkl')
+    # pd.to_pickle(stat_list, './pickle/stat_optics(3)_ma_xgb_log3.pkl')
+    # pd.to_pickle(stat_list, './pickle/stat_optics(3)_lim5_2.pkl')
+    pd.to_pickle(stat_list, './pickle/dbscan(.01_3)_lim8_limp10.pkl')
 
 
 if __name__ == func_o:
     ###########################
     #       Data Loading      #
     ###########################
-    root_path = './pickle'
+    root_path = 'pickle'
     ticker_pkl = 'kse_18_20_ticker.pkl'
     sector_pkl = 'kse_sector.pkl'
     # price_pkl = 'kse_18_20.pkl'

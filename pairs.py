@@ -31,14 +31,21 @@ def find_cointegrated_pairs_adf(dataframe, critial_level=0.02):
     pvalue_matrix = np.ones((n, n))  # initialize the matrix of p
     keys = dataframe.keys()  # get the column names
     pairs = []  # initilize the list for cointegration
+    validation = False
     for i in range(n):
         for j in range(i + 1, n):  # for j bigger than i
-            # stock1 = np.log(dataframe[keys[i]])  # obtain the price of two contract
+            # stock1 = np.log(dataframe[keys[i]])  # obtain the log price of two contract
             # stock2 = np.log(dataframe[keys[j]])
             stock1 = dataframe[keys[i]]  # obtain the price of two contract
             stock2 = dataframe[keys[j]]
             pval, beta, alpha, r2 = adf_coint_test(stock1, stock2)  # get conintegration
             pvalue_matrix[i, j] = pval
+            # Validation Image
+            if validation:
+                stock1.plot()
+                (beta*stock2 + alpha).plot()
+                plt.title("R2: {}, P val: {}".format(r2, pval))
+                plt.show()
             if pval < critial_level:  # if p-value less than the critical level
                 pairs.append((keys[i], keys[j], pval, beta, alpha, r2))  # record the contract with that p-value
 
@@ -63,7 +70,7 @@ def find_pairs(df_price):
 
     # Eigen portfolio returns
     df_eig = pd.DataFrame()
-    eig_lim = 5
+    eig_lim = 8
     for i in range(eig_lim):
         df_eig[i] = df_return.mul(pca.components_[i], axis=1).sum(axis=1)
 
@@ -121,13 +128,17 @@ def find_pairs(df_price):
         factor_sig = d.iloc[0, :]
         if not (factor_sig == True).any():
             continue
-        k = factor_sig.sum()
+        # k = factor_sig.sum()
+        exclude_mkt = ~factor_sig.index.isin([0])  # Exclude 1st Eig Port(Market Index)
+        k = 2**(factor_sig[exclude_mkt].sum())
+        d['sig_factor'] = [list(factor_sig.index[factor_sig])] * len(d)
         if k > len(d) or k < 2 or len(d) < 5:
             continue
 
         clustering_algo = {
             'Kmeans': KMeans(n_clusters=k, init='k-means++', random_state=1),
-            'OPTICS': OPTICS(min_samples=3, max_eps=0.1),
+            # 'OPTICS': OPTICS(min_samples=3, max_eps=0.1),
+            'OPTICS': OPTICS(min_samples=5),#, max_eps=0.05),
             'OPTICS_1': OPTICS(min_samples=k, max_eps=0.1),
             'OPTICS_2': OPTICS(min_samples=int(np.sqrt(k)), max_eps=0.1),
             'AC': AgglomerativeClustering(),
@@ -135,14 +146,15 @@ def find_pairs(df_price):
             'SC': SpectralClustering(),
             'Birch': Birch(),
             'MS': MeanShift(),
-            'DBSCAN': DBSCAN(eps=0.005)
+            'DBSCAN': DBSCAN(eps=0.01, min_samples=3)
         }
 
         kmeans = clustering_algo['Kmeans']
         kmeans.fit(df_params.loc[target_tickers, factor_sig == True])
         # gmm = GaussianMixture(n_components=k)
         # gmm.fit(df_params.loc[target_tickers, factor_sig == True])
-        clustering = clustering_algo['OPTICS']
+        # clustering = clustering_algo['OPTICS']
+        clustering = clustering_algo['DBSCAN']
         clustering.fit(df_params.loc[target_tickers, factor_sig == True])
         # d['cluster'] = kmeans.labels_
         d['cluster'] = clustering.labels_
@@ -151,27 +163,40 @@ def find_pairs(df_price):
         # Validation code with Image
         if k == -1:
             tc = factor_sig == True
-            colors = ['blue', 'red', 'green', 'orange', 'purple', 'yellow', 'magenta', 'black', 'cyan', 'black', 'gray', 'pink']
-            kclist = [colors[x] for x in kmeans.labels_]
-            oclist = [colors[x] for x in clustering.labels_]
+            colors = ['blue', 'red', 'green', 'orange', 'purple', 'yellow', 'magenta', 'black', 'cyan', 'black', 'gray','pink']
+
+            colors = [
+            'flag', 'prism', 'ocean', 'gist_earth', 'terrain', 'gist_stern',
+            'gnuplot', 'gnuplot2', 'CMRmap', 'cubehelix', 'brg',
+            'gist_rainbow', 'rainbow', 'jet', 'nipy_spectral', 'gist_ncar']
+            a = plt.get_cmap(colors[0])
+
+            # kclist = [colors[x] for x in kmeans.labels_]
+            # oclist = [colors[x] for x in clustering.labels_]
             # gclist = [colors[x] for x in gmm.predict(df_params.loc[target_tickers, factor_sig == True])]
             plt.title('K-Means')
             plt.scatter(df_params.loc[target_tickers, tc].iloc[:, 0], df_params.loc[target_tickers, tc].iloc[:, 1],
-                        c=kclist)
+                        c=(kmeans.labels_ + 1), cmap=plt.cm.cool)
+            plt.colorbar()
             plt.show()
             plt.title('OPTICS - {} labels'.format(len(set(clustering.labels_))))
             plt.scatter(df_params.loc[target_tickers, tc].iloc[:, 0], df_params.loc[target_tickers, tc].iloc[:, 1],
-                        c=oclist)
+                        c=(clustering.labels_ + 1), cmap=plt.cm.cool)
+            plt.colorbar()
             plt.show()
 
-    df_pairs_total = pd.DataFrame(columns=['s1', 's2', 'pval', 'beta', 'alpha', 'cluster'])
+    df_pairs_total = pd.DataFrame(columns=['s1', 's2', 'pval', 'beta', 'alpha', 'sig_factor', 'cluster'])
     for i, c1 in enumerate(classified_list):
-        if len(c1) < 3:
+        if 'sig_factor' not in c1.columns:
+            # There is no significant Risk Factor
             continue
         if 'cluster' not in c1.columns:
             # Not Clustered stocks in first clustering step
             continue
-        df_pairs_semi = pd.DataFrame(columns=['s1', 's2', 'pval', 'beta', 'alpha', 'cluster'])
+        if len(c1) < 3:
+            continue
+        sig_factor = c1['sig_factor'][0]
+        df_pairs_semi = pd.DataFrame(columns=['s1', 's2', 'pval', 'beta', 'alpha', 'sig_factor', 'cluster'])
         print("Finding Pairs from {} Cluster({} stocks in the cluster)..".format(i, len(c1)))
         for c2 in c1['cluster'].unique():
             if c2 == -1:
@@ -183,6 +208,7 @@ def find_pairs(df_price):
             df_pairs = pd.DataFrame(pairs, columns=['s1', 's2', 'pval', 'beta', 'alpha', 'r2'])
             df_pairs = df_pairs.sort_values(by='pval').reset_index(drop=True)
             df_pairs['cluster'] = str(i) + '_' + str(c2)
+            df_pairs['sig_factor'] = [sig_factor] * len(df_pairs)
             df_pairs_semi = df_pairs_semi.append(df_pairs, ignore_index=True)
 
         if len(df_pairs_semi) == 0:  # If c1 has only one cluster and it was -1(Noise),
@@ -194,17 +220,17 @@ def find_pairs(df_price):
         # r2_thr = 0.9
         df_pairs_semi = df_pairs_semi.loc[df_pairs_semi['r2'] > r2_low_thr, :]
         df_pairs_semi = df_pairs_semi.loc[df_pairs_semi['r2'] < r2_high_thr, :]
-        top_n = 5
+        top_n = 10
         if len(df_pairs_semi) > top_n:
             df_pairs_semi = df_pairs_semi[:top_n]
         df_pairs_total = df_pairs_total.append(df_pairs_semi, ignore_index=True)
 
         # Final Filtering
-        df_pairs_total = df_pairs_total.sort_values(by='pval').reset_index(drop=True)
+        # df_pairs_total = df_pairs_total.sort_values(by='pval').reset_index(drop=True)
         # if len(df_pairs_total) > 30:
             # df_pairs_total = df_pairs_total[:30]
 
-    return df_pairs_total
+    return df_pairs_total, pca.components_[:eig_lim]
 
 
 def draw_pairs(df_pairs, df_p):

@@ -185,12 +185,13 @@ def get_ml_label(y_series):
     return y_label
 
 
-def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list):
+def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_list):
     position_count = 0
     pair1 = pair_info['s1']
     pair2 = pair_info['s2']
     beta = pair_info['beta']
     alpha = pair_info['alpha']
+    sig_factor = pair_info['sig_factor']
 
     ## Get Data
     formation = formation_close.loc[:, [pair1, pair2]]
@@ -198,11 +199,13 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list):
 
     # Formation Period Spread
     fspread = formation[pair1] - (formation[pair2] * beta + alpha)
+    fspread_log = np.log(formation[pair1]) - np.log(formation[pair2] * beta + alpha)
     fspread_mu = np.mean(fspread)
     fspread_sd = np.std(fspread)
 
     # Trading Period Spread
     tspread = trading[pair1] - (trading[pair2] * beta + alpha)
+    tspread_log = np.log(trading[pair1]) - np.log(trading[pair2] * beta + alpha)
     trading['spread'] = (tspread - fspread_mu) / fspread_sd  # Normalized(with formation statistics) spread
     trading['status'] = trading.apply(lambda x: set_status(x['spread'], 0, 1), axis=1)
 
@@ -226,9 +229,15 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list):
     trading_ml_list = [x[1] for x in ml_list]
     trading_ml_list = [x.loc[:, [pair1, pair2]] for x in trading_ml_list]
 
+    formation_sig_eigport = eig_list[0].loc[:, sig_factor]
+    formation_ml_list += [formation_sig_eigport]
+    trading_sig_eigport = eig_list[1].loc[:, sig_factor]
+    trading_ml_list += [trading_sig_eigport]
+
     # Training set
     X_train = get_ml_features(formation_close.loc[:, [pair1, pair2]], *formation_ml_list)
-    y_train = get_ml_label(fspread)
+    # y_train = get_ml_label(fspread)
+    y_train = get_ml_label(fspread_log)
 
     # Filtering na index in y
     not_na_index = y_train.isnull() == False
@@ -243,7 +252,8 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list):
 
     # Test set
     X_test = get_ml_features(trading_close.loc[:, [pair1, pair2]], *trading_ml_list)
-    y_test = get_ml_label(tspread)
+    # y_test = get_ml_label(tspread)
+    y_test = get_ml_label(tspread_log)
     # y_test = get_ml_label((tspread-fspread_mu)/fspread_sd)
     X_test = scaler.transform(X_test)
 
@@ -318,7 +328,7 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list):
         clf.fit(X, y)
         return clf
 
-    model = xg_training(X_train, y_train)
+    model = logistic_training(X_train, y_train)
     # rf = rf_training(X_train, y_train)
     # imp_values = pd.Series(rf.feature_importances_)
     # sns.barplot(x=imp_values.index, y=imp_values)
