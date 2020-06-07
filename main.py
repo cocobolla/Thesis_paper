@@ -134,8 +134,8 @@ def pairs_trading(formation_price, trading_price, ml_list=None):
     return trading_stat
 
 
-func_o = '__main__1'
-func_t = '__main__'
+func_o = '__main__'
+func_t = '__main__1'
 
 if __name__ == func_t:
     ###########################
@@ -309,7 +309,12 @@ if __name__ == func_t:
         stat_list.append(stat)
     # pd.to_pickle(stat_list, './pickle/stat_optics(3)_ma_xgb_log3.pkl')
     # pd.to_pickle(stat_list, './pickle/stat_optics(3)_lim5_2.pkl')
-    pd.to_pickle(stat_list, './pickle/dbscan(.01_3)_lim8_limp10.pkl')
+    # pd.to_pickle(stat_list, './pickle/kmeans(2^)_lim5_limp10_ret.pkl')
+    # pd.to_pickle(stat_list, './pickle/kmeans(2^)_lim7_limp10_bugfix.pkl')
+    pd.to_pickle(stat_list, './pickle/optics_dbscan(.5_2_4).pkl')
+    # pd.to_pickle(stat_list, './pickle/optics_dbscan(.25_1)_lim3_limp10_bugfix.pkl')
+    # pd.to_pickle(stat_list, './pickle/dbscan(.01_3)_lim7_limp10_ret.pkl')
+    # pd.to_pickle(stat_list, './pickle/dbscan(.01_3)_lim8_limp10.pkl')
 
 
 if __name__ == func_o:
@@ -371,18 +376,17 @@ if __name__ == func_o:
     mom120 = (np.log(Close)).diff(120)
 
     # Set Formation & Trading Period
-    # fs = datetime.datetime(2018, 1, 1)
-    # fe = datetime.datetime(2018, 12, 31)
-    # ts = datetime.datetime(2019, 1, 1)
-    # te = datetime.datetime(2019, 6, 30)
+    """
     fs = datetime.datetime(2018, 7, 1)
     fe = datetime.datetime(2019, 6, 30)
     ts = datetime.datetime(2019, 7, 1)
     te = datetime.datetime(2019, 12, 31)
-    # fs = datetime.datetime(2013, 1, 1)
-    # fe = datetime.datetime(2013, 12, 31)
-    # ts = datetime.datetime(2014, 1, 1)
-    # te = datetime.datetime(2014, 6, 30)
+
+    """
+    fs = datetime.datetime(2014, 1, 1)
+    fe = datetime.datetime(2014, 12, 31)
+    ts = datetime.datetime(2015, 1, 1)
+    te = datetime.datetime(2015, 6, 30)
 
     # Copy the target period data
     df_price = Close.loc[fs:te, :].copy()
@@ -450,19 +454,23 @@ if __name__ == func_o:
 
     ml_list = [
         (formation_volume, trading_volume),
-        (formation_ma5, trading_ma5),
-        (formation_ma20, trading_ma20),
-        (formation_ma60, trading_ma60),
-        (formation_ma120, trading_ma120),
+        # (formation_ma5, trading_ma5),
+        # (formation_ma20, trading_ma20),
+        # (formation_ma60, trading_ma60),
+        # (formation_ma120, trading_ma120),
         # (formation_ema5, trading_ema5),
-        # (formation_ema20, trading_ema20),
+        (formation_ema20, trading_ema20),
         # (formation_ema60, trading_ema60),
         # (formation_ema120, trading_ema120),
-        (formation_bbu, trading_bbu),
-        (formation_bbd, trading_bbd),
+        # (formation_bbu, trading_bbu),
+        # (formation_bbd, trading_bbd),
         (formation_rsi14, trading_rsi14),
         (formation_macd, trading_macd),
+        (formation_mom20, trading_mom20),
+        # (formation_mom60, trading_mom60),
     ]
 
-    stat = pairs_trading(formation_close, trading_close, ml_list=ml_list)
+    # stat = pairs_trading(formation_close, trading_close, ml_list=ml_list)
+    stat = pairs_trading(formation_close, trading_close)
     stat.print_statistics()
+    pd.to_pickle(stat, './pickle/test.pkl')

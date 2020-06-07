@@ -14,10 +14,17 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-
+"""
 sd_weight = {
     'Close': 0.5,
     'Open': 1.5,
+    'Loss Cut': 4
+}
+"""
+
+sd_weight = {
+    'Close': 0.5,
+    'Open': 2,
     'Loss Cut': 4
 }
 
@@ -46,9 +53,16 @@ def get_pair_returns(pair_info, formation_close, trading_close):
     beta = pair_info['beta']
     alpha = pair_info['alpha']
 
-    ## Get Data
-    formation = formation_close.loc[:, [pair1, pair2]]
-    trading = trading_close.loc[:, [pair1, pair2]]
+    # Get Data
+    formation_price = formation_close.loc[:, [pair1, pair2]]
+    trading_price = trading_close.loc[:, [pair1, pair2]]
+
+    # If we trade with dollar neutral, It seems like we notice the return's spread
+    formation_return = (formation_close.loc[:, [pair1, pair2]].pct_change() + 1).cumprod()
+    trading_return = (trading_close.loc[:, [pair1, pair2]].pct_change() + 1).cumprod()
+
+    formation = formation_return
+    trading = trading_return
 
     # Formation Period Spread
     fspread = formation[pair1] - (formation[pair2] * beta + alpha)
@@ -130,7 +144,7 @@ def get_pair_returns(pair_info, formation_close, trading_close):
         temp_trading = trading.loc[trading['count'] == c, :]
         # Initial value is margin of each pair's investment
         margin = 0.5
-        initial_pv = (temp_trading['pair1_p'][0] + temp_trading['pair2_p']) * margin
+        initial_pv = (temp_trading['pair1_p'][0] + temp_trading['pair2_p'][0]) * margin
         trading.loc[temp_trading.index[0], 'pv'] = 0  #
         for t in range(1, len(temp_trading.index)):
             now_index = temp_trading.index[t]
@@ -193,9 +207,16 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
     alpha = pair_info['alpha']
     sig_factor = pair_info['sig_factor']
 
-    ## Get Data
+    # Get Data
     formation = formation_close.loc[:, [pair1, pair2]]
     trading = trading_close.loc[:, [pair1, pair2]]
+
+    # If we trade with dollar neutral, It seems like we notice the return's spread
+    formation_return = (formation_close.loc[:, [pair1, pair2]].pct_change() + 1).cumprod()
+    trading_return = (trading_close.loc[:, [pair1, pair2]].pct_change() + 1).cumprod()
+
+    formation = formation_return
+    trading = trading_return
 
     # Formation Period Spread
     fspread = formation[pair1] - (formation[pair2] * beta + alpha)
@@ -236,8 +257,8 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
 
     # Training set
     X_train = get_ml_features(formation_close.loc[:, [pair1, pair2]], *formation_ml_list)
-    # y_train = get_ml_label(fspread)
-    y_train = get_ml_label(fspread_log)
+    y_train = get_ml_label(fspread)
+    # y_train = get_ml_label(fspread_log)
 
     # Filtering na index in y
     not_na_index = y_train.isnull() == False
@@ -252,8 +273,8 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
 
     # Test set
     X_test = get_ml_features(trading_close.loc[:, [pair1, pair2]], *trading_ml_list)
-    # y_test = get_ml_label(tspread)
-    y_test = get_ml_label(tspread_log)
+    y_test = get_ml_label(tspread)
+    # y_test = get_ml_label(tspread_log)
     # y_test = get_ml_label((tspread-fspread_mu)/fspread_sd)
     X_test = scaler.transform(X_test)
 
@@ -282,7 +303,7 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
         clf.fit(X, y)
         return clf
 
-    def rf_training(X, y, tuning=True):
+    def rf_training(X, y, tuning=False):
         y = y.astype('int')
         params = {
             'n_estimators': [50, 100, 300, 500],
@@ -291,9 +312,9 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
             'min_samples_split': [2],
             'max_depth': [10, 30, 70]
         }
-        clf = RandomForestClassifier(n_estimators=30, max_features='auto', n_jobs=12, random_state=0)
-        # clf = RandomForestClassifier(n_estimators=100, max_features='auto', n_jobs=12, random_state=0,
-                                     # min_samples_leaf=4, min_samples_split=2, max_depth=30)
+        # clf = RandomForestClassifier(n_estimators=30, max_features='auto', n_jobs=12, random_state=0)
+        clf = RandomForestClassifier(n_estimators=100, max_features='auto', n_jobs=12, random_state=0,
+                                     min_samples_leaf=4, min_samples_split=2, max_depth=30)
         if tuning:
             rnd_search_cv = RandomizedSearchCV(clf, params, n_iter=50, verbose=0, cv=3, random_state=0)
             # rnd_search_cv = GridSearchCV(clf, params, verbose=0, cv=3)
@@ -328,7 +349,7 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
         clf.fit(X, y)
         return clf
 
-    model = logistic_training(X_train, y_train)
+    model = xg_training(X_train, y_train)
     # rf = rf_training(X_train, y_train)
     # imp_values = pd.Series(rf.feature_importances_)
     # sns.barplot(x=imp_values.index, y=imp_values)
@@ -419,7 +440,7 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
         temp_trading = trading.loc[trading['count'] == c, :]
         # Initial value is margin of each pair's investment
         margin = 0.5
-        initial_pv = (temp_trading['pair1_p'][0] + temp_trading['pair2_p']) * margin
+        initial_pv = (temp_trading['pair1_p'][0] + temp_trading['pair2_p'][0]) * margin
         trading.loc[temp_trading.index[0], 'pv'] = 0  #
         for t in range(1, len(temp_trading.index)):
             now_index = temp_trading.index[t]

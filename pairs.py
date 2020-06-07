@@ -1,11 +1,12 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from sklearn.cluster import KMeans, OPTICS, DBSCAN, \
+from sklearn.cluster import KMeans, OPTICS, DBSCAN, cluster_optics_dbscan,\
     SpectralClustering, AffinityPropagation, MeanShift, Birch, AgglomerativeClustering
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
@@ -31,6 +32,7 @@ def find_cointegrated_pairs_adf(dataframe, critial_level=0.02):
     pvalue_matrix = np.ones((n, n))  # initialize the matrix of p
     keys = dataframe.keys()  # get the column names
     pairs = []  # initilize the list for cointegration
+    # validation = False
     validation = False
     for i in range(n):
         for j in range(i + 1, n):  # for j bigger than i
@@ -61,18 +63,18 @@ def find_pairs(df_price):
         df_return[col] = (df_return[col] - df_return[col].mean()) / df_return[col].std()
     """
     scaler = StandardScaler()
-    df_return = pd.DataFrame(scaler.fit_transform(df_return), columns=df_return.columns, index=df_return.index)
+    df_return_scaled = pd.DataFrame(scaler.fit_transform(df_return), columns=df_return.columns, index=df_return.index)
 
     # PCA on return space
     pca = PCA()
-    pca.fit(df_return)
-    return_pca = pca.transform(df_return)
+    pca.fit(df_return_scaled)
+    return_pca = pca.transform(df_return_scaled)
 
     # Eigen portfolio returns
     df_eig = pd.DataFrame()
-    eig_lim = 8
+    eig_lim = 7
     for i in range(eig_lim):
-        df_eig[i] = df_return.mul(pca.components_[i], axis=1).sum(axis=1)
+        df_eig[i] = df_return_scaled.mul(pca.components_[i], axis=1).sum(axis=1)
 
     # Regression (X: Eigen portfolios(Risk Factor from PCA), Y: Individual Return)
     df_reg = df_eig.copy()
@@ -81,6 +83,8 @@ def find_pairs(df_price):
     # Factor Loading estimation(OLS) for each stocks
     df_params = pd.DataFrame()
     df_pval = pd.DataFrame()
+
+    # Independent Variable of Regression should be df_return, not df_return_scaled
     for ticker in df_return.columns:
         results = sm.OLS(df_return.loc[:, ticker], df_reg).fit()
         df_params[ticker] = results.params
@@ -131,14 +135,20 @@ def find_pairs(df_price):
         # k = factor_sig.sum()
         exclude_mkt = ~factor_sig.index.isin([0])  # Exclude 1st Eig Port(Market Index)
         k = 2**(factor_sig[exclude_mkt].sum())
-        d['sig_factor'] = [list(factor_sig.index[factor_sig])] * len(d)
-        if k > len(d) or k < 2 or len(d) < 5:
+
+        sig_factor = list(factor_sig.index[factor_sig])
+        assert(sig_factor != [])
+        if 'const' in sig_factor:
+            continue
+        d['sig_factor'] = [sig_factor] * len(d)
+        if len(d) < k*2 or k < 2 or len(d) < 5:
             continue
 
         clustering_algo = {
             'Kmeans': KMeans(n_clusters=k, init='k-means++', random_state=1),
             # 'OPTICS': OPTICS(min_samples=3, max_eps=0.1),
-            'OPTICS': OPTICS(min_samples=5),#, max_eps=0.05),
+            # 'OPTICS': OPTICS(min_samples=5),#, max_eps=0.05),
+            'OPTICS': OPTICS(min_samples=2),#, max_eps=0.05),
             'OPTICS_1': OPTICS(min_samples=k, max_eps=0.1),
             'OPTICS_2': OPTICS(min_samples=int(np.sqrt(k)), max_eps=0.1),
             'AC': AgglomerativeClustering(),
@@ -149,6 +159,58 @@ def find_pairs(df_price):
             'DBSCAN': DBSCAN(eps=0.01, min_samples=3)
         }
 
+        def optics_dbscan(X):
+            # validation = True
+            validation = False
+            clust = clustering_algo['OPTICS']
+            clust.fit(X)
+            optics_params = X.copy()
+            optics_params['cluster'] = clust.labels_
+            optics_params['order'] = clust.ordering_
+            optics_params['rd'] = clust.reachability_
+            optics_params['cd'] = clust.core_distances_
+
+            rd_diff = optics_params['rd'].sort_values().diff()
+            exclude_list = [np.nan, np.inf, -np.inf]
+            rd_diff_mean = rd_diff[~rd_diff.isin(exclude_list)].mean()
+            rd_diff_std = rd_diff[~rd_diff.isin(exclude_list)].std()
+            eps_thr = rd_diff_mean # + rd_diff_std
+            # eps_thr = rd_diff[~rd_diff.isin(exclude_list)].mean()
+            rd_outlier = rd_diff > eps_thr
+            sig_eps_num = int(len(rd_diff)*0.30)
+            rd_outlier = rd_outlier[sig_eps_num:]
+            cutoff1 = rd_outlier[rd_outlier == True].index[0]
+            cutoff0 = rd_diff[:cutoff1].index[-2]
+            eps = (optics_params.loc[cutoff0, 'rd'] + optics_params.loc[cutoff1, 'rd'])/2
+            labels = cluster_optics_dbscan(reachability=clust.reachability_,
+                                            core_distances=clust.core_distances_,
+                                            ordering=clust.ordering_, eps=eps)
+            if validation:
+                plt.figure(figsize=(10, 7))
+                G = gridspec.GridSpec(1, 1)
+                ax1 = plt.subplot(G[0, :])
+
+                labels = clust.labels_[clust.ordering_]
+                reachability = clust.reachability_
+                space = np.arange(len(optics_params))
+                colors = ['g.', 'r.', 'b.', 'y.', 'c.', 'o.', 'k.']
+                for klass, color in zip(range(0, 5), colors):
+                    Xk = space[labels == klass]
+                    Rk = reachability[labels == klass]
+                    ax1.plot(Xk, Rk, color, alpha=0.3)
+                ax1.plot(space[labels == -1], reachability[labels == -1], 'k.', alpha=0.7)
+                ax1.set_ylabel('Reachability (epsilon distance)')
+                ax1.set_title('Reachability Plot')
+                plt.bar(optics_params.index, optics_params['rd'])
+                plt.show()
+
+                optics_params.sort_values(by='rd').rd.plot(kind='bar', alpha=.5)
+                optics_params.sort_values(by='rd').rd.diff().plot(kind='bar', alpha=.5, color='orange')
+                # params.sort_values(by='rd').cd.plot(kind='bar', color='orange', alpha=.5)
+                plt.axhline(y=eps)
+                plt.show()
+            return labels
+
         kmeans = clustering_algo['Kmeans']
         kmeans.fit(df_params.loc[target_tickers, factor_sig == True])
         # gmm = GaussianMixture(n_components=k)
@@ -157,7 +219,14 @@ def find_pairs(df_price):
         clustering = clustering_algo['DBSCAN']
         clustering.fit(df_params.loc[target_tickers, factor_sig == True])
         # d['cluster'] = kmeans.labels_
-        d['cluster'] = clustering.labels_
+        # d['cluster'] = clustering.labels_
+        d['cluster'] = optics_dbscan(df_params.loc[target_tickers, factor_sig == True])
+        """
+        if k == 2:
+            d['cluster'] = kmeans.labels_
+        else:
+            d['cluster'] = optics_dbscan(df_params.loc[target_tickers, factor_sig == True])
+        """
         # d['cluster'] = gmm.predict(df_params.loc[target_tickers, factor_sig == True])
 
         # Validation code with Image
@@ -169,23 +238,23 @@ def find_pairs(df_price):
             'flag', 'prism', 'ocean', 'gist_earth', 'terrain', 'gist_stern',
             'gnuplot', 'gnuplot2', 'CMRmap', 'cubehelix', 'brg',
             'gist_rainbow', 'rainbow', 'jet', 'nipy_spectral', 'gist_ncar']
-            a = plt.get_cmap(colors[0])
 
             # kclist = [colors[x] for x in kmeans.labels_]
             # oclist = [colors[x] for x in clustering.labels_]
             # gclist = [colors[x] for x in gmm.predict(df_params.loc[target_tickers, factor_sig == True])]
             plt.title('K-Means')
-            plt.scatter(df_params.loc[target_tickers, tc].iloc[:, 0], df_params.loc[target_tickers, tc].iloc[:, 1],
-                        c=(kmeans.labels_ + 1), cmap=plt.cm.cool)
+            plt.scatter(df_params.loc[target_tickers, tc].iloc[:, 1], df_params.loc[target_tickers, tc].iloc[:, 2],
+                        c=(kmeans.labels_ + 1), cmap=plt.cm.tab20)
             plt.colorbar()
             plt.show()
             plt.title('OPTICS - {} labels'.format(len(set(clustering.labels_))))
-            plt.scatter(df_params.loc[target_tickers, tc].iloc[:, 0], df_params.loc[target_tickers, tc].iloc[:, 1],
-                        c=(clustering.labels_ + 1), cmap=plt.cm.cool)
+            plt.scatter(df_params.loc[target_tickers, tc].iloc[:, 1], df_params.loc[target_tickers, tc].iloc[:, 2],
+                        c=(d['cluster']), cmap=plt.cm.tab20)
             plt.colorbar()
             plt.show()
 
     df_pairs_total = pd.DataFrame(columns=['s1', 's2', 'pval', 'beta', 'alpha', 'sig_factor', 'cluster'])
+    # Final Round for Finding Pairs: Cointegration
     for i, c1 in enumerate(classified_list):
         if 'sig_factor' not in c1.columns:
             # There is no significant Risk Factor
@@ -198,13 +267,20 @@ def find_pairs(df_price):
         sig_factor = c1['sig_factor'][0]
         df_pairs_semi = pd.DataFrame(columns=['s1', 's2', 'pval', 'beta', 'alpha', 'sig_factor', 'cluster'])
         print("Finding Pairs from {} Cluster({} stocks in the cluster)..".format(i, len(c1)))
+
         for c2 in c1['cluster'].unique():
             if c2 == -1:
                 # print('Noise')
                 continue
             print("\tFinding Pairs from {} Small Cluster".format(c2))
             stocks = c1.index[c1['cluster'] == c2]
-            _, pairs = find_cointegrated_pairs_adf(df_price.loc[:, stocks])
+            # Cointegration test based on Prices
+            # _, pairs_p = find_cointegrated_pairs_adf(df_price.loc[:, stocks])
+
+            # Based Cointegration test based on Returns
+            _, pairs_r = find_cointegrated_pairs_adf((df_return.loc[:, stocks] + 1).cumprod())
+
+            pairs = pairs_r
             df_pairs = pd.DataFrame(pairs, columns=['s1', 's2', 'pval', 'beta', 'alpha', 'r2'])
             df_pairs = df_pairs.sort_values(by='pval').reset_index(drop=True)
             df_pairs['cluster'] = str(i) + '_' + str(c2)
