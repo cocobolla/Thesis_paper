@@ -72,7 +72,7 @@ def find_pairs(df_price):
 
     # Eigen portfolio returns
     df_eig = pd.DataFrame()
-    eig_lim = 7
+    eig_lim = 5
     for i in range(eig_lim):
         df_eig[i] = df_return_scaled.mul(pca.components_[i], axis=1).sum(axis=1)
 
@@ -156,7 +156,7 @@ def find_pairs(df_price):
             'SC': SpectralClustering(),
             'Birch': Birch(),
             'MS': MeanShift(),
-            'DBSCAN': DBSCAN(eps=0.01, min_samples=3)
+            'DBSCAN': DBSCAN(eps=0.0007, min_samples=3)
         }
 
         def optics_dbscan(X):
@@ -174,7 +174,7 @@ def find_pairs(df_price):
             exclude_list = [np.nan, np.inf, -np.inf]
             rd_diff_mean = rd_diff[~rd_diff.isin(exclude_list)].mean()
             rd_diff_std = rd_diff[~rd_diff.isin(exclude_list)].std()
-            eps_thr = rd_diff_mean # + rd_diff_std
+            eps_thr = rd_diff_mean + rd_diff_std
             # eps_thr = rd_diff[~rd_diff.isin(exclude_list)].mean()
             rd_outlier = rd_diff > eps_thr
             sig_eps_num = int(len(rd_diff)*0.30)
@@ -217,10 +217,11 @@ def find_pairs(df_price):
         # gmm.fit(df_params.loc[target_tickers, factor_sig == True])
         # clustering = clustering_algo['OPTICS']
         clustering = clustering_algo['DBSCAN']
+        # clustering = OPTICS(min_samples=10)
         clustering.fit(df_params.loc[target_tickers, factor_sig == True])
         # d['cluster'] = kmeans.labels_
-        # d['cluster'] = clustering.labels_
-        d['cluster'] = optics_dbscan(df_params.loc[target_tickers, factor_sig == True])
+        d['cluster'] = clustering.labels_
+        # d['cluster'] = optics_dbscan(df_params.loc[target_tickers, factor_sig == True])
         """
         if k == 2:
             d['cluster'] = kmeans.labels_
@@ -285,6 +286,9 @@ def find_pairs(df_price):
             df_pairs = df_pairs.sort_values(by='pval').reset_index(drop=True)
             df_pairs['cluster'] = str(i) + '_' + str(c2)
             df_pairs['sig_factor'] = [sig_factor] * len(df_pairs)
+            # Exclude Duplicates
+            df_pairs.drop_duplicates(['s1'], keep='first')
+            df_pairs.drop_duplicates(['s2'], keep='first')
             df_pairs_semi = df_pairs_semi.append(df_pairs, ignore_index=True)
 
         if len(df_pairs_semi) == 0:  # If c1 has only one cluster and it was -1(Noise),

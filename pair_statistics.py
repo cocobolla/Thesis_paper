@@ -46,7 +46,7 @@ class Statistics:
         rf = 0.02
         self.daily_ret_sum = (self.ret_df - 1).sum(axis=1)
         self.daily_ret_mean = (self.ret_df - 1).mean(axis=1)
-        self.sharpe = sharpe_ratio(self.daily_ret_mean, rf)
+        self.sharpe = sharpe_ratio(self.daily_ret_sum, rf)
         # self.sharpe = sharpe_ratio(self.ret_df.cumprod().mean(axis=1).pct_change().dropna(), rf)
 
     def print_statistics(self):

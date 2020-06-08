@@ -83,18 +83,18 @@ def main():
     Statistics(ret_df).print_statistics()
 
 
-def pairs_trading(formation_price, trading_price, ml_list=None):
+def pairs_trading(formation_price, trading_price, ml_list=None, name=None):
     ###########################
     #      Finding Pairs      #
     ###########################
-    pickle_name = str(formation_price.index[0].date()) + '_' + str(trading_price.index[-1].date())
-    if not os.path.isfile('pickle/{}_not.pkl'.format(pickle_name)):
+    pickle_name = name + '_' + str(formation_price.index[0].date()) + '_' + str(trading_price.index[-1].date())
+    if not os.path.isfile('pickle/pairs/{}.pkl'.format(pickle_name)):
         df_pairs, eig_weights = pairs.find_pairs(formation_price)
-        # pd.Series([df_pairs, eig_weights], index=['pairs', 'eig_weights'])\
-            # .to_pickle('pickle/{}.pkl'.format(pickle_name))
+        pd.Series([df_pairs, eig_weights], index=['pairs', 'eig_weights'])\
+            .to_pickle('pickle/pairs/{}.pkl'.format(pickle_name))
     else:
         print('Get Pairs from Pickle...')
-        pair_pkl = pd.read_pickle('pickle/{}.pkl'.format(pickle_name))
+        pair_pkl = pd.read_pickle('pickle/pairs/{}.pkl'.format(pickle_name))
         df_pairs, eig_weights = pair_pkl['pairs'], pair_pkl['eig_weights']
 
     # Calculate Eigen-Portfolio(Risk Factor)'s Return
@@ -134,10 +134,16 @@ def pairs_trading(formation_price, trading_price, ml_list=None):
     return trading_stat
 
 
-func_o = '__main__'
-func_t = '__main__1'
+func_o = '__main__1'
+func_t = '__main__'
 
 if __name__ == func_t:
+    name = 'benchmark'
+    # name = 'kmeans_lim5'
+    # name = 'opscan_lim5_thr1'
+    # name = 'optics_lim5_mpts2'
+    # name = 'dbscan_.001_lim5'
+    # name = 'dbscan_.0007_lim5'
     ###########################
     #       Data Loading      #
     ###########################
@@ -303,15 +309,15 @@ if __name__ == func_t:
             # (formation_mom60, trading_mom60),
         ]
 
-        # stat = pairs_trading(formation_close, trading_close, ml_list=ml_list)
-        stat = pairs_trading(formation_close, trading_close)
+        # stat = pairs_trading(formation_close, trading_close, ml_list=ml_list, name=name)
+        stat = pairs_trading(formation_close, trading_close, ml_list=None, name=name)
         stat.print_statistics()
         stat_list.append(stat)
     # pd.to_pickle(stat_list, './pickle/stat_optics(3)_ma_xgb_log3.pkl')
     # pd.to_pickle(stat_list, './pickle/stat_optics(3)_lim5_2.pkl')
     # pd.to_pickle(stat_list, './pickle/kmeans(2^)_lim5_limp10_ret.pkl')
     # pd.to_pickle(stat_list, './pickle/kmeans(2^)_lim7_limp10_bugfix.pkl')
-    pd.to_pickle(stat_list, './pickle/optics_dbscan(.5_2_4).pkl')
+    pd.to_pickle(stat_list, './pickle/stats/{}_signal2_logit.pkl'.format(name))
     # pd.to_pickle(stat_list, './pickle/optics_dbscan(.25_1)_lim3_limp10_bugfix.pkl')
     # pd.to_pickle(stat_list, './pickle/dbscan(.01_3)_lim7_limp10_ret.pkl')
     # pd.to_pickle(stat_list, './pickle/dbscan(.01_3)_lim8_limp10.pkl')

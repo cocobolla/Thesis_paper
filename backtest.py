@@ -22,12 +22,17 @@ sd_weight = {
 }
 """
 
-sd_weight = {
+sd_ori_weight = {
     'Close': 0.5,
-    'Open': 2,
-    'Loss Cut': 4
+    'Open': 1.5,
+    'Loss Cut': 3
 }
 
+sd_weight = {
+    'Close': 0.5,
+    'Open': 0.8,
+    'Loss Cut': 3
+}
 
 def set_status(spread, mu, std):
     if spread > mu + std * sd_weight['Loss Cut']:
@@ -144,7 +149,7 @@ def get_pair_returns(pair_info, formation_close, trading_close):
         temp_trading = trading.loc[trading['count'] == c, :]
         # Initial value is margin of each pair's investment
         margin = 0.5
-        initial_pv = (temp_trading['pair1_p'][0] + temp_trading['pair2_p'][0]) * margin
+        initial_pv = (temp_trading['pair1_p'] + temp_trading['pair2_p']) * margin
         trading.loc[temp_trading.index[0], 'pv'] = 0  #
         for t in range(1, len(temp_trading.index)):
             now_index = temp_trading.index[t]
@@ -349,7 +354,7 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
         clf.fit(X, y)
         return clf
 
-    model = xg_training(X_train, y_train)
+    model = logistic_training(X_train, y_train)
     # rf = rf_training(X_train, y_train)
     # imp_values = pd.Series(rf.feature_importances_)
     # sns.barplot(x=imp_values.index, y=imp_values)
@@ -379,7 +384,7 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
             # trading['position'][i] = 'short' if trading['pred'][i] == 0 else None
             if (prev_status == 3) or (prev_status == 2 and waiting_short == True):
                 if trading['pred'][i] == 0:
-                # if trading['pred'][i] < 0.35:
+                # if trading['pred'][i] < 0.65:
                     trading['position'][i] = 'short'
                     waiting_short = False
                 else:
@@ -403,7 +408,7 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
         if now_status == 6:
             if (prev_status == 5) or (prev_status == 6 and waiting_long == True):
                 if trading['pred'][i] == 1:
-                # if trading['pred'][i] > 0.65:
+                # if trading['pred'][i] > 0.35:
                     trading['position'][i] = 'long'  # if trading['pred'][i] == 1 else None
                     waiting_long = False
                 else:
@@ -440,8 +445,13 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
         temp_trading = trading.loc[trading['count'] == c, :]
         # Initial value is margin of each pair's investment
         margin = 0.5
-        initial_pv = (temp_trading['pair1_p'][0] + temp_trading['pair2_p'][0]) * margin
-        trading.loc[temp_trading.index[0], 'pv'] = 0  #
+        initial_pv = (temp_trading['pair1_p'] + temp_trading['pair2_p']) * margin
+        # Trading Fee (10bp)
+        fee = 0.001
+        enter_fee = (temp_trading['pair1_p'][0] + temp_trading['pair2_p'][0]) * fee
+        exit_fee = (temp_trading['pair1_p'][-1] + temp_trading['pair2_p'][-1]) * fee
+
+        trading.loc[temp_trading.index[0], 'pv'] = 0
         for t in range(1, len(temp_trading.index)):
             now_index = temp_trading.index[t]
             prev_index = temp_trading.index[t - 1]
@@ -453,9 +463,16 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
                 trading.loc[now_index, 'pv'] = -pv
         trading.loc[temp_trading.index, 'quantity_neutral'] = trading.loc[temp_trading.index, 'pv'].cumsum()
         trading.loc[temp_trading.index, 'quantity_neutral'] += initial_pv
+        # Trading Fee
+        trading.loc[temp_trading.index[0], 'quantity_neutral'] += enter_fee
+        trading.loc[temp_trading.index[-1], 'quantity_neutral'] -= exit_fee
+
         trading.loc[temp_trading.index, 'quantity_neutral'] = trading.loc[
                                                                   temp_trading.index, 'quantity_neutral'].pct_change() + 1
         trading.loc[temp_trading.index[0], 'quantity_neutral'] = 1
+
+
+
     # trading['quantity_neutral'] = trading['quantity_neutral'].cumprod()
 
     # ret_list.append(trading['returns'])
