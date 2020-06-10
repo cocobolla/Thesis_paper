@@ -13,6 +13,27 @@ from sklearn.preprocessing import StandardScaler
 from statsmodels.tsa.stattools import adfuller
 
 
+def erase_any_duplicates(df, col1, col2):
+    df_temp = df.copy()
+    df_temp = df_temp.drop_duplicates([col1], keep='first')
+    df_temp = df_temp.drop_duplicates([col2], keep='first')
+
+    for i in reversed(df_temp.index):
+        s1 = df_temp.loc[i, col1]
+        s2 = df_temp.loc[i, col2]
+        s1_dup = False
+        s2_dup = False
+        if s1 in df_temp.loc[:, col2]:
+            s1_dup = True
+        if s2 in df_temp.loc[:, col1]:
+            s2_dup = True
+        if s1_dup + s2_dup == True:
+            df_temp = df_temp[df_temp.index != i]
+
+    df_temp = df_temp.reset_index(drop=True)
+    return df_temp
+
+
 def adf_coint_test(df1, df2):
     df2_temp = df2.copy()
     # df2_temp = sm.add_constant(df2_temp)
@@ -35,6 +56,7 @@ def find_cointegrated_pairs_adf(dataframe, critial_level=0.02):
     # validation = False
     validation = False
     for i in range(n):
+        # print("Cointegration Test: {}/{}".format(i, n))
         for j in range(i + 1, n):  # for j bigger than i
             # stock1 = np.log(dataframe[keys[i]])  # obtain the log price of two contract
             # stock2 = np.log(dataframe[keys[j]])
@@ -54,7 +76,31 @@ def find_cointegrated_pairs_adf(dataframe, critial_level=0.02):
     return pvalue_matrix, pairs
 
 
-def find_pairs(df_price):
+def find_pairs_coint(df_price):
+    df_return = df_price.pct_change()
+    df_return = df_return.dropna(axis=0)
+
+    _, pairs_r = find_cointegrated_pairs_adf((df_return + 1).cumprod())
+
+    pairs = pairs_r
+    df_pairs = pd.DataFrame(pairs, columns=['s1', 's2', 'pval', 'beta', 'alpha', 'r2'])
+
+    # Select Top n Pairs from each Clusters
+    r2_high_thr = 1
+    r2_low_thr = 0.75
+    df_pairs = df_pairs.loc[df_pairs['r2'] > r2_low_thr, :]
+    df_pairs = df_pairs.loc[df_pairs['r2'] < r2_high_thr, :]
+
+    # Exclude Duplicates
+    df_pairs = df_pairs.sort_values(by='pval').reset_index(drop=True)
+    df_pairs_dup = erase_any_duplicates(df_pairs, 's1', 's2')
+
+    df_pairs_dup['sig_factor'] = '0'
+    df_pairs_dup['cluster'] = '0'
+    return df_pairs_dup, _
+
+
+def find_pairs_clustering(df_price):
     # Normalization
     df_return = df_price.pct_change()
     df_return = df_return.dropna(axis=0)
@@ -97,7 +143,7 @@ def find_pairs(df_price):
     pval_thr = 0.05
     df_pval_bool = df_pval < pval_thr
 
-    def classify_duplicate(df):
+    def clustering_1st(df):
         df_c = df.copy()
         df_list = []
         df_non = pd.DataFrame()
@@ -124,7 +170,7 @@ def find_pairs(df_price):
                 df_list.append(temp_df.T)
         return df_list, df_non.T
 
-    classified_list, df_nc = classify_duplicate(df_pval_bool)
+    classified_list, df_nc = clustering_1st(df_pval_bool)
 
     # Second Clustering: Grouping stocks which have similar factor loadings
     for d in classified_list:  # [:10]:
@@ -148,7 +194,7 @@ def find_pairs(df_price):
             'Kmeans': KMeans(n_clusters=k, init='k-means++', random_state=1),
             # 'OPTICS': OPTICS(min_samples=3, max_eps=0.1),
             # 'OPTICS': OPTICS(min_samples=5),#, max_eps=0.05),
-            'OPTICS': OPTICS(min_samples=2),#, max_eps=0.05),
+            'OPTICS': OPTICS(min_samples=5),#, max_eps=0.05),
             'OPTICS_1': OPTICS(min_samples=k, max_eps=0.1),
             'OPTICS_2': OPTICS(min_samples=int(np.sqrt(k)), max_eps=0.1),
             'AC': AgglomerativeClustering(),
@@ -156,13 +202,14 @@ def find_pairs(df_price):
             'SC': SpectralClustering(),
             'Birch': Birch(),
             'MS': MeanShift(),
-            'DBSCAN': DBSCAN(eps=0.0007, min_samples=3)
+            'DBSCAN': DBSCAN(eps=0.0010, min_samples=3)
+            # 'DBSCAN': DBSCAN(eps=10, min_samples=3)
         }
 
         def optics_dbscan(X):
             # validation = True
             validation = False
-            clust = clustering_algo['OPTICS']
+            clust = OPTICS(min_samples=2)
             clust.fit(X)
             optics_params = X.copy()
             optics_params['cluster'] = clust.labels_
@@ -172,16 +219,48 @@ def find_pairs(df_price):
 
             rd_diff = optics_params['rd'].sort_values().diff()
             exclude_list = [np.nan, np.inf, -np.inf]
-            rd_diff_mean = rd_diff[~rd_diff.isin(exclude_list)].mean()
-            rd_diff_std = rd_diff[~rd_diff.isin(exclude_list)].std()
+
+            '''
+            # Thr 1
+            rd_diff_mean = rd_diff[~rd_diff.isin(exclude_list)].sort_values().mean()
+            rd_diff_std = rd_diff[~rd_diff.isin(exclude_list)].sort_values().std()
             eps_thr = rd_diff_mean + rd_diff_std
+
+            # Thr 2
+            eps_thr = rd_diff_mean 
+
+            '''
+            # Thr 3
+            outlier_stock = rd_diff[~rd_diff.isin(exclude_list)].sort_values().diff().argmax()
+            outlier_idx = rd_diff[~rd_diff.isin(exclude_list)].sort_values().index.get_loc(outlier_stock)
+            rd_diff_mean = rd_diff[~rd_diff.isin(exclude_list)].sort_values()[:outlier_idx].mean()
+            rd_diff_std = rd_diff[~rd_diff.isin(exclude_list)].sort_values()[:outlier_idx].std()
+            eps_thr = rd_diff_mean # + rd_diff_std
+
             # eps_thr = rd_diff[~rd_diff.isin(exclude_list)].mean()
             rd_outlier = rd_diff > eps_thr
-            sig_eps_num = int(len(rd_diff)*0.30)
+            sig_eps_num = int(len(rd_diff)*0.20)
             rd_outlier = rd_outlier[sig_eps_num:]
-            cutoff1 = rd_outlier[rd_outlier == True].index[0]
-            cutoff0 = rd_diff[:cutoff1].index[-2]
-            eps = (optics_params.loc[cutoff0, 'rd'] + optics_params.loc[cutoff1, 'rd'])/2
+
+            try:
+                cutoff1 = rd_outlier[rd_outlier == True].index[0]
+                cutoff0 = rd_diff[:cutoff1].index[-2]
+                eps = (optics_params.loc[cutoff0, 'rd'] + optics_params.loc[cutoff1, 'rd']) / 2
+            except IndexError:
+                print("Error: ")
+                # Thr 1
+                rd_diff_mean = rd_diff[~rd_diff.isin(exclude_list)].sort_values().mean()
+                rd_diff_std = rd_diff[~rd_diff.isin(exclude_list)].sort_values().std()
+                eps_thr = rd_diff_mean + rd_diff_std
+                # eps_thr = rd_diff[~rd_diff.isin(exclude_list)].mean()
+
+                rd_outlier = rd_diff > eps_thr
+                sig_eps_num = int(len(rd_diff)*0.20)
+                rd_outlier = rd_outlier[sig_eps_num:]
+                cutoff1 = rd_outlier[rd_outlier == True].index[0]
+                cutoff0 = rd_diff[:cutoff1].index[-2]
+                eps = (optics_params.loc[cutoff0, 'rd'] + optics_params.loc[cutoff1, 'rd']) / 2
+
             labels = cluster_optics_dbscan(reachability=clust.reachability_,
                                             core_distances=clust.core_distances_,
                                             ordering=clust.ordering_, eps=eps)
@@ -201,7 +280,7 @@ def find_pairs(df_price):
                 ax1.plot(space[labels == -1], reachability[labels == -1], 'k.', alpha=0.7)
                 ax1.set_ylabel('Reachability (epsilon distance)')
                 ax1.set_title('Reachability Plot')
-                plt.bar(optics_params.index, optics_params['rd'])
+                # plt.bar(optics_params.index, optics_params['rd'])
                 plt.show()
 
                 optics_params.sort_values(by='rd').rd.plot(kind='bar', alpha=.5)
@@ -215,13 +294,13 @@ def find_pairs(df_price):
         kmeans.fit(df_params.loc[target_tickers, factor_sig == True])
         # gmm = GaussianMixture(n_components=k)
         # gmm.fit(df_params.loc[target_tickers, factor_sig == True])
-        # clustering = clustering_algo['OPTICS']
-        clustering = clustering_algo['DBSCAN']
+        clustering = clustering_algo['OPTICS']
+        # clustering = clustering_algo['DBSCAN']
         # clustering = OPTICS(min_samples=10)
         clustering.fit(df_params.loc[target_tickers, factor_sig == True])
         # d['cluster'] = kmeans.labels_
-        d['cluster'] = clustering.labels_
-        # d['cluster'] = optics_dbscan(df_params.loc[target_tickers, factor_sig == True])
+        # d['cluster'] = clustering.labels_
+        d['cluster'] = optics_dbscan(df_params.loc[target_tickers, factor_sig == True])
         """
         if k == 2:
             d['cluster'] = kmeans.labels_
@@ -278,7 +357,7 @@ def find_pairs(df_price):
             # Cointegration test based on Prices
             # _, pairs_p = find_cointegrated_pairs_adf(df_price.loc[:, stocks])
 
-            # Based Cointegration test based on Returns
+            # Cointegration test based on Returns
             _, pairs_r = find_cointegrated_pairs_adf((df_return.loc[:, stocks] + 1).cumprod())
 
             pairs = pairs_r
@@ -286,13 +365,27 @@ def find_pairs(df_price):
             df_pairs = df_pairs.sort_values(by='pval').reset_index(drop=True)
             df_pairs['cluster'] = str(i) + '_' + str(c2)
             df_pairs['sig_factor'] = [sig_factor] * len(df_pairs)
+
+            """
+            r2_high_thr = 1
+            r2_low_thr = 0.75
+            df_pairs = df_pairs.loc[df_pairs['r2'] > r2_low_thr, :]
+            df_pairs = df_pairs.loc[df_pairs['r2'] < r2_high_thr, :]
+            """
+
             # Exclude Duplicates
-            df_pairs.drop_duplicates(['s1'], keep='first')
-            df_pairs.drop_duplicates(['s2'], keep='first')
+            # df_pairs = df_pairs.drop_duplicates(['s1'], keep='first')
+            # df_pairs = df_pairs.drop_duplicates(['s2'], keep='first')
+            df_pairs.reset_index(drop=True)
+            df_pairs = erase_any_duplicates(df_pairs, 's1', 's2')
+
+            if len(df_pairs) > 10:
+                df_pairs = df_pairs[:10]
             df_pairs_semi = df_pairs_semi.append(df_pairs, ignore_index=True)
 
-        if len(df_pairs_semi) == 0:  # If c1 has only one cluster and it was -1(Noise),
+        if len(df_pairs_semi) == 0:  # If c1 has only one cluster and it is -1(Noise),
             continue
+        # df_pairs_semi = df_pairs_semi.sort_values(by='pval').reset_index(drop=True)
 
         # Select Top n Pairs from each Clusters
         r2_high_thr = 1
@@ -300,15 +393,14 @@ def find_pairs(df_price):
         # r2_thr = 0.9
         df_pairs_semi = df_pairs_semi.loc[df_pairs_semi['r2'] > r2_low_thr, :]
         df_pairs_semi = df_pairs_semi.loc[df_pairs_semi['r2'] < r2_high_thr, :]
-        top_n = 10
-        if len(df_pairs_semi) > top_n:
-            df_pairs_semi = df_pairs_semi[:top_n]
+        df_pairs_semi = df_pairs_semi.sort_values(by='pval').reset_index(drop=True)
+        # top_n = 10
+        # top_n = int(len(df_return.columns) / len(c1['cluster'].unique()))
+        # top_n = int(len(df_return.columns) / len(c1['cluster'].unique()))
+        # if len(df_pairs_semi) > top_n:
+            # df_pairs_semi = df_pairs_semi[:top_n]
         df_pairs_total = df_pairs_total.append(df_pairs_semi, ignore_index=True)
-
-        # Final Filtering
-        # df_pairs_total = df_pairs_total.sort_values(by='pval').reset_index(drop=True)
-        # if len(df_pairs_total) > 30:
-            # df_pairs_total = df_pairs_total[:30]
+    df_pairs_total.reset_index(drop=True)
 
     return df_pairs_total, pca.components_[:eig_lim]
 

@@ -62,7 +62,7 @@ def main():
     #      Finding Pairs      #
     ###########################
     if not os.path.isfile('pickle/pairs3.pkl'):
-        df_pairs = pairs.find_pairs(formation_close)
+        df_pairs = pairs.find_pairs_clustering(formation_close)
         # df_pairs.to_pickle('pickle/pairs.pkl')
     else:
         print('Get Pairs from Pickle...')
@@ -87,31 +87,42 @@ def pairs_trading(formation_price, trading_price, ml_list=None, name=None):
     ###########################
     #      Finding Pairs      #
     ###########################
-    pickle_name = name + '_' + str(formation_price.index[0].date()) + '_' + str(trading_price.index[-1].date())
-    if not os.path.isfile('pickle/pairs/{}.pkl'.format(pickle_name)):
-        df_pairs, eig_weights = pairs.find_pairs(formation_price)
-        pd.Series([df_pairs, eig_weights], index=['pairs', 'eig_weights'])\
-            .to_pickle('pickle/pairs/{}.pkl'.format(pickle_name))
+    if name is None:
+        df_pairs, eig_weights = pairs.find_pairs_clustering(formation_price)
+
     else:
-        print('Get Pairs from Pickle...')
-        pair_pkl = pd.read_pickle('pickle/pairs/{}.pkl'.format(pickle_name))
-        df_pairs, eig_weights = pair_pkl['pairs'], pair_pkl['eig_weights']
+        pickle_name = name + '_' + str(formation_price.index[0].date()) + '_' + str(trading_price.index[-1].date())
+        if not os.path.isfile('pickle/pairs/{}.pkl'.format(pickle_name)):
+            df_pairs, eig_weights = pairs.find_pairs_clustering(formation_price)
+            # df_pairs, eig_weights = pairs.find_pairs_coint(formation_price)
+            pd.Series([df_pairs, eig_weights], index=['pairs', 'eig_weights'])\
+                .to_pickle('pickle/pairs/{}.pkl'.format(pickle_name))
+        else:
+            print('Get Pairs from Pickle...')
+            pair_pkl = pd.read_pickle('pickle/pairs/{}.pkl'.format(pickle_name))
+            df_pairs, eig_weights = pair_pkl['pairs'], pair_pkl['eig_weights']
 
-    # Calculate Eigen-Portfolio(Risk Factor)'s Return
-    formation_idx = formation_price.index
-    trading_idx = trading_price.index
-    total_price = formation_price.append(trading_price)
-    total_return = total_price.pct_change().dropna(axis=0)
-    formation_return = total_return.loc[formation_idx, :]
-    trading_return = total_return.loc[trading_idx, :]
+    # df_pairs = pairs.erase_any_duplicates(df_pairs, 's1', 's2')
+    df_pairs = df_pairs.sort_values(by='pval').reset_index(drop=True)
+    # thr = min(len(df_pairs), 120)
+    # df_pairs = df_pairs[:thr]
 
-    formation_eig_return = pd.DataFrame()
-    trading_eig_return = pd.DataFrame()
-    for i in range(len(eig_weights)):
-        formation_eig_return[i] = formation_return.mul(eig_weights[i], axis=1).sum(axis=1)
-        trading_eig_return[i] = trading_return.mul(eig_weights[i], axis=1).sum(axis=1)
+    if ml_list is not None:
+        # Calculate Eigen-Portfolio(Risk Factor)'s Return
+        formation_idx = formation_price.index
+        trading_idx = trading_price.index
+        total_price = formation_price.append(trading_price)
+        total_return = total_price.pct_change().dropna(axis=0)
+        formation_return = total_return.loc[formation_idx, :]
+        trading_return = total_return.loc[trading_idx, :]
 
-    eig_list = [formation_eig_return, trading_eig_return]
+        formation_eig_return = pd.DataFrame()
+        trading_eig_return = pd.DataFrame()
+        for i in range(len(eig_weights)):
+            formation_eig_return[i] = formation_return.mul(eig_weights[i], axis=1).sum(axis=1)
+            trading_eig_return[i] = trading_return.mul(eig_weights[i], axis=1).sum(axis=1)
+
+        eig_list = [formation_eig_return, trading_eig_return]
 
     ###########################
     #    Trading with Pairs   #
@@ -138,9 +149,14 @@ func_o = '__main__1'
 func_t = '__main__'
 
 if __name__ == func_t:
-    name = 'benchmark'
-    # name = 'kmeans_lim5'
-    # name = 'opscan_lim5_thr1'
+    # name = 'benchmark'
+    # name = 'kmeans_lim5_cutoff2_sorted'
+    # name = 'opscan_lim5_thr1_cutoff2'
+    name = 'opscan_lim5_thr5_cutoff2_sorted'
+    name = 'opscan_lim5_20'
+    # name = 'test_opscan1'
+    # name = 'optics_mpts2_lim7_cutoff2'
+    # name = 'coint_cutoff2'
     # name = 'optics_lim5_mpts2'
     # name = 'dbscan_.001_lim5'
     # name = 'dbscan_.0007_lim5'
@@ -317,13 +333,15 @@ if __name__ == func_t:
     # pd.to_pickle(stat_list, './pickle/stat_optics(3)_lim5_2.pkl')
     # pd.to_pickle(stat_list, './pickle/kmeans(2^)_lim5_limp10_ret.pkl')
     # pd.to_pickle(stat_list, './pickle/kmeans(2^)_lim7_limp10_bugfix.pkl')
-    pd.to_pickle(stat_list, './pickle/stats/{}_signal2_logit.pkl'.format(name))
+    pd.to_pickle(stat_list, './pickle/stats/{}_signal2_cutoff.pkl'.format(name))
     # pd.to_pickle(stat_list, './pickle/optics_dbscan(.25_1)_lim3_limp10_bugfix.pkl')
     # pd.to_pickle(stat_list, './pickle/dbscan(.01_3)_lim7_limp10_ret.pkl')
     # pd.to_pickle(stat_list, './pickle/dbscan(.01_3)_lim8_limp10.pkl')
 
 
 if __name__ == func_o:
+    name = 'Ang'
+    name = None
     ###########################
     #       Data Loading      #
     ###########################
@@ -382,7 +400,6 @@ if __name__ == func_o:
     mom120 = (np.log(Close)).diff(120)
 
     # Set Formation & Trading Period
-    """
     fs = datetime.datetime(2018, 7, 1)
     fe = datetime.datetime(2019, 6, 30)
     ts = datetime.datetime(2019, 7, 1)
@@ -393,6 +410,7 @@ if __name__ == func_o:
     fe = datetime.datetime(2014, 12, 31)
     ts = datetime.datetime(2015, 1, 1)
     te = datetime.datetime(2015, 6, 30)
+    """
 
     # Copy the target period data
     df_price = Close.loc[fs:te, :].copy()
@@ -459,24 +477,24 @@ if __name__ == func_o:
     formation_mom120, trading_mom120 = df_mom120[fs:fe], df_mom120[ts:te]
 
     ml_list = [
-        (formation_volume, trading_volume),
+        # (formation_volume, trading_volume),
         # (formation_ma5, trading_ma5),
         # (formation_ma20, trading_ma20),
         # (formation_ma60, trading_ma60),
         # (formation_ma120, trading_ma120),
-        # (formation_ema5, trading_ema5),
-        (formation_ema20, trading_ema20),
+        (formation_ema5, trading_ema5),
+        # (formation_ema20, trading_ema20),
         # (formation_ema60, trading_ema60),
         # (formation_ema120, trading_ema120),
         # (formation_bbu, trading_bbu),
         # (formation_bbd, trading_bbd),
-        (formation_rsi14, trading_rsi14),
-        (formation_macd, trading_macd),
-        (formation_mom20, trading_mom20),
+        # (formation_rsi14, trading_rsi14),
+        # (formation_macd, trading_macd),
+        # (formation_mom20, trading_mom20),
         # (formation_mom60, trading_mom60),
     ]
 
-    # stat = pairs_trading(formation_close, trading_close, ml_list=ml_list)
-    stat = pairs_trading(formation_close, trading_close)
+    # stat = pairs_trading(formation_close, trading_close, ml_list=ml_list, name=name)
+    stat = pairs_trading(formation_close, trading_close, ml_list=None, name=name)
     stat.print_statistics()
-    pd.to_pickle(stat, './pickle/test.pkl')
+    pd.to_pickle([stat], './pickle/stats/test1.pkl')

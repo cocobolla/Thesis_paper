@@ -7,6 +7,7 @@ from xgboost import XGBClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import RandomizedSearchCV, GridSearchCV
 from scipy.stats import reciprocal, uniform
+from sklearn.metrics import confusion_matrix, roc_curve, auc, accuracy_score
 
 
 import talib
@@ -65,6 +66,13 @@ def get_pair_returns(pair_info, formation_close, trading_close):
     # If we trade with dollar neutral, It seems like we notice the return's spread
     formation_return = (formation_close.loc[:, [pair1, pair2]].pct_change() + 1).cumprod()
     trading_return = (trading_close.loc[:, [pair1, pair2]].pct_change() + 1).cumprod()
+    formation_return = formation_return.fillna(1)
+    p1_init_ret = (trading_close.loc[trading_close.index[0], pair1] /
+                   formation_close.loc[formation_close.index[-1], pair1])
+    p2_init_ret = (trading_close.loc[trading_close.index[0], pair2] /
+                   formation_close.loc[formation_close.index[-1], pair2])
+    trading_return.loc[trading_return.index[0], pair1] = p1_init_ret
+    trading_return.loc[trading_return.index[0], pair2] = p2_init_ret
 
     formation = formation_return
     trading = trading_return
@@ -187,11 +195,11 @@ def get_ml_features(*args):
 
 
 def get_ml_label(y_series):
-    alpha = 0.4
+    alpha = 0.3
     fit_smoothing = SimpleExpSmoothing(y_series).fit(smoothing_level=alpha, optimized=False)
-    # y_smoothing = fit_smoothing.fittedvalues
+    y_smoothing = fit_smoothing.fittedvalues
     # y_smoothing = y_series
-    y_smoothing = y_series.rolling(window=10, center=True).mean()
+    # y_smoothing = y_series.rolling(window=10, center=True).mean()
     y_label = y_smoothing.diff().shift(-1)
     y_label[y_label.isnull() == False] = (y_label[y_label.isnull() == False] > 0) * 1
     # y_label = 1*(y_smoothing.diff() > 0).shift(-1)# .fillna(0)
@@ -219,6 +227,13 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
     # If we trade with dollar neutral, It seems like we notice the return's spread
     formation_return = (formation_close.loc[:, [pair1, pair2]].pct_change() + 1).cumprod()
     trading_return = (trading_close.loc[:, [pair1, pair2]].pct_change() + 1).cumprod()
+    formation_return = formation_return.fillna(1)
+    p1_init_ret = (trading_close.loc[trading_close.index[0], pair1] /
+                   formation_close.loc[formation_close.index[-1], pair1])
+    p2_init_ret = (trading_close.loc[trading_close.index[0], pair2] /
+                   formation_close.loc[formation_close.index[-1], pair2])
+    trading_return.loc[trading_return.index[0], pair1] = p1_init_ret
+    trading_return.loc[trading_return.index[0], pair2] = p2_init_ret
 
     formation = formation_return
     trading = trading_return
@@ -261,7 +276,8 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
     trading_ml_list += [trading_sig_eigport]
 
     # Training set
-    X_train = get_ml_features(formation_close.loc[:, [pair1, pair2]], *formation_ml_list)
+    # X_train = get_ml_features(formation_close.loc[:, [pair1, pair2]], *formation_ml_list)
+    X_train = get_ml_features(formation, *formation_ml_list)
     y_train = get_ml_label(fspread)
     # y_train = get_ml_label(fspread_log)
 
@@ -277,7 +293,7 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
     X_train = scaler.transform(X_train)
 
     # Test set
-    X_test = get_ml_features(trading_close.loc[:, [pair1, pair2]], *trading_ml_list)
+    X_test = get_ml_features(trading.loc[:, [pair1, pair2]], *trading_ml_list)
     y_test = get_ml_label(tspread)
     # y_test = get_ml_label(tspread_log)
     # y_test = get_ml_label((tspread-fspread_mu)/fspread_sd)
@@ -354,7 +370,7 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
         clf.fit(X, y)
         return clf
 
-    model = logistic_training(X_train, y_train)
+    model = svm_training(X_train, y_train)
     # rf = rf_training(X_train, y_train)
     # imp_values = pd.Series(rf.feature_importances_)
     # sns.barplot(x=imp_values.index, y=imp_values)
@@ -362,6 +378,11 @@ def get_pair_returns_ml(pair_info, formation_close, trading_close, ml_list, eig_
 
     y_pred = model.predict(X_test)
     y_pred = (y_pred > 0.5) * 1
+    test_df = pd.DataFrame()
+    test_df['test'] = y_test
+    test_df['pred'] = y_pred
+    test_df = test_df.dropna(axis=0)
+    print('Accuracy: {}'.format(accuracy_score(test_df['test'], test_df['pred'])))
     # y_pred = model.predict_proba(X_test)[:, 1]
 
     trading['pred'] = y_pred
