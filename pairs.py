@@ -118,7 +118,7 @@ def find_pairs_clustering(df_price):
 
     # Eigen portfolio returns
     df_eig = pd.DataFrame()
-    eig_lim = 5
+    eig_lim = 7
     for i in range(eig_lim):
         df_eig[i] = df_return_scaled.mul(pca.components_[i], axis=1).sum(axis=1)
 
@@ -239,7 +239,7 @@ def find_pairs_clustering(df_price):
 
             # eps_thr = rd_diff[~rd_diff.isin(exclude_list)].mean()
             rd_outlier = rd_diff > eps_thr
-            sig_eps_num = int(len(rd_diff)*0.20)
+            sig_eps_num = int(len(rd_diff)*0.30)
             rd_outlier = rd_outlier[sig_eps_num:]
 
             try:
@@ -251,11 +251,11 @@ def find_pairs_clustering(df_price):
                 # Thr 1
                 rd_diff_mean = rd_diff[~rd_diff.isin(exclude_list)].sort_values().mean()
                 rd_diff_std = rd_diff[~rd_diff.isin(exclude_list)].sort_values().std()
-                eps_thr = rd_diff_mean + rd_diff_std
+                eps_thr = rd_diff_mean # + rd_diff_std
                 # eps_thr = rd_diff[~rd_diff.isin(exclude_list)].mean()
 
                 rd_outlier = rd_diff > eps_thr
-                sig_eps_num = int(len(rd_diff)*0.20)
+                sig_eps_num = int(len(rd_diff)*0.30)
                 rd_outlier = rd_outlier[sig_eps_num:]
                 cutoff1 = rd_outlier[rd_outlier == True].index[0]
                 cutoff0 = rd_diff[:cutoff1].index[-2]
@@ -379,8 +379,11 @@ def find_pairs_clustering(df_price):
             df_pairs.reset_index(drop=True)
             df_pairs = erase_any_duplicates(df_pairs, 's1', 's2')
 
-            if len(df_pairs) > 10:
-                df_pairs = df_pairs[:10]
+            # if len(df_pairs) > 10:
+                # df_pairs = df_pairs[:10]
+            # top_semi_n = int(len(stocks) / len(c1['cluster'].unique()))
+            # if len(df_pairs) > top_semi_n:
+                # df_pairs = df_pairs[:top_semi_n]
             df_pairs_semi = df_pairs_semi.append(df_pairs, ignore_index=True)
 
         if len(df_pairs_semi) == 0:  # If c1 has only one cluster and it is -1(Noise),
@@ -394,11 +397,11 @@ def find_pairs_clustering(df_price):
         df_pairs_semi = df_pairs_semi.loc[df_pairs_semi['r2'] > r2_low_thr, :]
         df_pairs_semi = df_pairs_semi.loc[df_pairs_semi['r2'] < r2_high_thr, :]
         df_pairs_semi = df_pairs_semi.sort_values(by='pval').reset_index(drop=True)
-        # top_n = 10
+        top_n = 10
         # top_n = int(len(df_return.columns) / len(c1['cluster'].unique()))
-        # top_n = int(len(df_return.columns) / len(c1['cluster'].unique()))
-        # if len(df_pairs_semi) > top_n:
-            # df_pairs_semi = df_pairs_semi[:top_n]
+        # top_n = int(len(df_return.columns) / len(classified_list))
+        if len(df_pairs_semi) > top_n:
+            df_pairs_semi = df_pairs_semi[:top_n]
         df_pairs_total = df_pairs_total.append(df_pairs_semi, ignore_index=True)
     df_pairs_total.reset_index(drop=True)
 
